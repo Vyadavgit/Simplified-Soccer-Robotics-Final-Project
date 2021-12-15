@@ -45,15 +45,38 @@ def resetAngles(right, left, angle = 0):
     right.reset_angle(angle)
     left.reset_angle(angle)
 
-def rotate(right, left, angle=90, velocity = 150):
-    ratio = angle/360
-    dist = robotCirc * ratio
-    desiredAngle = ((dist/wheelCirc) * 360 * (14/15))
-    resetAngles(right, left)
-    right.run_target(velocity, desiredAngle, Stop.HOLD, False)
-    left.run_target(velocity, -desiredAngle)
+def rotate(right, left, angle, gyroSensor, velocity = 150):
+    while gyroSensor.angle() != angle:
+        if(gyroSensor.angle() < angle):
+            # if its less than 0 turn right
+            right.run(-velocity)
+            left.run(velocity)
+        else:
+            # if its more than 0 turn left
+            right.run(velocity)
+            left.run(-velocity)
+    else: 
+        right.stop()
+        left.stop()
+        return
 
-def score(gyroSensor, right, left):
+def goToHome(colorSensor, gyroSensor, right, left):
+    ev3.screen.print("Going Home")
+    goToTarget(right, left, -.1)
+    rotate(right, left, 180, gyroSensor)
+    time.sleep(.25)
+    while colorSensor[0].color() != Color.RED:
+        right.run(500)
+        left.run(500)
+    else:
+        right.stop()
+        left.stop()
+        goToTarget(right, left, .3)
+        rotate(right, left, 0, gyroSensor)
+        gyroSensor.reset_angle(0)
+        return
+
+def score(gyroSensor, colorSensor, irSensor, right, left):
     ev3.screen.print("scoring")
     while(gyroSensor.angle() < -5 or gyroSensor.angle() > 5):
         if(gyroSensor.angle() < 0):
@@ -65,35 +88,61 @@ def score(gyroSensor, right, left):
             right.run(160)
             left.run(-160)
     else:
-        goToTarget(right, left, .3, 500)
+        right.stop()
+        left.stop()
+        while colorSensor[0].color() != Color.BLUE and colorSensor[1].color() != Color.BLUE:
+            right.run(1000)
+            left.run(1000)
+            if max(irSensor.get_strength()) < 10:
+                right.stop()
+                left.stop()
+                return False
+        else:
+            right.stop()
+            left.stop()
+            goToHome(colorSensor, gyroSensor, right, left)
+            return True
 
 
-def align(irSensor, right, left):
-    ev3.screen.print("aligning")
-    zones = [4, 5, 6]
+def align(irSensor, colorSensors, right, left):
+    ev3.screen.print("Aligning")
+    zones = [5]
+    if max(irSensor.get_strength()) < 5:
+        right.run(360)
+        left.run(360)
+        while max(irSensor.get_strength()) < 5:
+            if colorSensors[0].color() == Color.BLUE or colorSensors[1].color() == Color.BLUE:
+                right.stop()
+                left.stop()
+                return False
+            continue
+    right.stop()
+    left.stop()
     while irSensor.get_zone() not in zones: 
         if(irSensor.get_zone() < 5):
             # if its less than 5 its on its left 
-            right.run(160)
-            left.run(-160)
+            right.run(360)
+            left.run(-360)
         else: 
             # if its more than 5 its on the right
-            right.run(-160)
-            left.run(160)
+            right.run(-360)
+            left.run(360)
     right.stop()
     left.stop()
     return True
 
-def ballFollow(irSensor, right, left):
-    ev3.screen.print("ballFollow")
-    if align(irSensor, right, left):
-        while irSensor.get_strength()[2] < 40 or irSensor.get_strength()[1] < 40: 
-            right.run(160)
-            left.run(160)
-        else:
-            right.stop()
-            left.stop()
-            return "score"
+def ballFollow(irSensor, colorSensor, gyroSensor, right, left):
+    ev3.screen.print("Following Ball")
+    while irSensor.get_strength()[2] < 30 and irSensor.get_strength()[1] < 30 and irSensor.get_strength()[3] < 30: 
+        if(colorSensor[0].color() == Color.BLUE or colorSensor[1].color() == Color.BLUE):
+            goToHome(colorSensor, gyroSensor, right, left)
+            return False
+        right.run(500)
+        left.run(500)
+    else:
+        right.stop()
+        left.stop()
+        return True
 
 
 # Create your objects here.
@@ -104,15 +153,23 @@ def main():
     leftColorSensor = ColorSensor(Port.S4)
     gyroSensor = GyroSensor(Port.S1)
     irSensor = InfraredSensor(Port.S2)
-    # direction info 0x42 
-    # 0x43 strength at 5 ir segments
-    # read separately 
+
     # Write your program here.
     ev3.speaker.beep()
-    # if ballFollow(irSensor, rightMotor, leftMotor) == "score":
-    #     score(gyroSensor, rightMotor, leftMotor)
-    while True: 
-        print(irSensor.get_strength())
-        time.sleep(1)
-main()
+    if align(irSensor, (colorSensor, leftColorSensor), rightMotor, leftMotor):
+        if ballFollow(irSensor, (colorSensor, leftColorSensor), gyroSensor, rightMotor, leftMotor):
+            score(gyroSensor, (colorSensor, leftColorSensor), irSensor, rightMotor, leftMotor)
+    else: 
+        goToHome((colorSensor, leftColorSensor), gyroSensor, rightMotor, leftMotor)
+    while True:
+        if irSensor.get_zone():
+            if align(irSensor, (colorSensor, leftColorSensor), rightMotor, leftMotor):
+                if ballFollow(irSensor, (colorSensor, leftColorSensor), gyroSensor, rightMotor, leftMotor):
+                    score(gyroSensor, (colorSensor, leftColorSensor), irSensor, rightMotor, leftMotor)
+            else: 
+                goToHome((colorSensor, leftColorSensor), gyroSensor, rightMotor, leftMotor)
+        else: 
+            continue
 
+
+main()
